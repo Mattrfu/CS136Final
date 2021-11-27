@@ -2,10 +2,12 @@
 
 import argparse
 import gym
-from gym.spaces import Discrete, Box
+from gym.spaces import Discrete, Box, Tuple, MultiDiscrete
 import numpy as np
 import random
 import copy
+
+from ray.rllib.agents import ppo
 
 import ray
 from ray import tune
@@ -14,10 +16,10 @@ from ray.rllib.utils.test_utils import check_learning_achieved
 parser = argparse.ArgumentParser()
 parser.add_argument("--run", type=str, default="contrib/LinUCB")
 parser.add_argument("--as-test", action="store_true")
-parser.add_argument("--stop-iters", type=int, default=200)
-parser.add_argument("--stop-timesteps", type=int, default=100000)
+parser.add_argument("--stop-iters", type=int, default=20000)
+parser.add_argument("--stop-timesteps", type=int, default=1000000)
 parser.add_argument("--num-agents", type=int, default=4)
-parser.add_argument("--stop-reward", type=float, default=10.0)
+parser.add_argument("--stop-reward", type=float, default=50.0)
 
 class Person:
     # constructor to initialize the attributes of Person class
@@ -128,37 +130,76 @@ def runDA(context, desires, agents):
 
 class DABandit(gym.Env):
     def __init__(self, config=None):
+        self.num_agents = config["num-agents"]
         self.desires = []
         for i in range(config["num-agents"] * 2):
-            self.desires += [random.shuffle(list(range(1, config["num-agents"])))]
+            tempList = list(range(0, config["num-agents"]))
+            random.shuffle(tempList)
+            self.desires += [tempList]
+        print(self.desires)
         self.action_space = Discrete(config["num-agents"] + 1)
-        self.observation_space = self.desires[0]
+        self.observation_space = MultiDiscrete([config["num-agents"] + 1] * config["num-agents"] * 2)
+            #MultiDiscrete(tuple([len(self.desires[0])] * len(self.desires[0]) * 2))
+        #     Box(
+        #     self.desires[0], shape=(config["num-agents"],), dtype=np.float32
+        # )
+
+            #Tuple(self.desires[0])
         self.cur_context = None
 
     def reset(self):
+        #print("Happens")
         self.cur_context = []
         self.desires = []
-        for i in range(config["num-agents"] * 2):
-            self.desires += [random.shuffle(list(range(1, config["num-agents"])))]
-        self.action_space = Discrete(config["num-agents"] + 1)
-        self.observation_space = self.desires[0]
-        return np.array(self.observation_space)
+        for i in range(self.num_agents * 2):
+            tempList = list(range(0, self.num_agents))
+            random.shuffle(tempList)
+            self.desires += [tempList]
+        return np.array(self.desires[0] + self.cur_context + [self.num_agents] * (self.num_agents - len(self.cur_context)))
 
     def step(self, action):
+        Done = False
+        # print("Step occuring")
+        # print(self.desires[0])
+        # print(action)
+
+        # print(self.cur_context)
         reward = 0
-        if action == len(self.action_space) - 1:
-            # This is truncation case
-            if len(set(self.cur_context)) > len(self.cur_context):
+        if action in self.cur_context:
+            Done = True
+            reward = -100
+            #self.reset()
+            self.cur_context = []
+        elif action == self.num_agents:
+            Done = True
+            # This is truncaction case
+
+            # partner = runDA(self.cur_context, self.desires, self.num_agents)
+            # if partner == None:
+            #     reward = -1
+            # else:
+            #     reward = len(self.desires[0]) - self.desires[0].index(partner)
+            #print(self.cur_context)
+            #print(self.desires[0])
+            happens = False
+            for i in range(len(self.cur_context)):
+                if self.cur_context[i] == self.desires[0][i]:
+                    reward += (len(self.desires) - i) * 100
+                    happens = True
+            if not happens:
                 reward = -10
-            else:
-                partner = runDA(self.cur_context, self.desires, config["num-agents"])
-                if partner == None:
-                    reward = -1
-                else:
-                    reward = len(self.desires[0]) - self.desires[0].index(partner)
+            f = open("results1.txt", "a")
+            #f.write("Context: " + ",".join(str(e) for e in self.cur_context) + ". Desires: " + ", ".join(str(e) for e in self.desires[0]) + "\n")
+            f.write(str(self.cur_context == self.desires[0]) + "\n")
+            f.close()
+            # self.cur_context = []
+            # print("happens1")
+            #self.reset()
+            self.cur_context = []
+        else:
+            self.cur_context += [action]
 
-
-        return (np.array(self.cur_context), reward, True,
+        return (np.array(self.desires[0] + self.cur_context + [self.num_agents] * (self.num_agents - len(self.cur_context))), reward, Done,
                 {
                     "regret": 10 - reward
                 })
@@ -176,10 +217,17 @@ if __name__ == "__main__":
 
     config = {
         "env": DABandit,
-        "num-agents": args.num-agents,
+
+        # "rollout_fragment_length": 1,
+        # "train_batch_size": 1,
+        # "timesteps_per_iteration": 100,
+        "env_config": {"num-agents": args.num_agents},
     }
 
-    results = tune.run(args.run, config=config, stop=stop)
+    # trainer = ppo.PPOTrainer()
+    # while True:
+    #     print(trainer.train)
+    results = tune.run(ppo.PPOTrainer, config=config, stop=stop)
 
-    if args.as_test:
-        check_learning_achieved(results, args.stop_reward)
+    # if args.as_test:
+    #     check_learning_achieved(results, args.stop_reward)
