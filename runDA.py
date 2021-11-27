@@ -1,8 +1,8 @@
 import copy
 
-def runStudentDA(context, desires):
-    # from example 12.5 in textbook
-    num_agents = 3
+def runStudentDA(cur_context, input_desires, num_agents):
+    desires = copy.deepcopy(input_desires)
+    desires[0] = cur_context
 
     print("Proposing preferences: ", desires[:num_agents])
     print("Accepting preferences: ", desires[num_agents:])
@@ -78,6 +78,7 @@ desires = [
     ]
 
 context = [1, 0, 2]
-student_1_score = runStudentDA(context, desires)
+num_agents = 3
+student_1_score = runStudentDA(context, desires, num_agents)
 
 print("Student 0's score is", student_1_score)
